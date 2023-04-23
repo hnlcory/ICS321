@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost:3306
--- Generation Time: Apr 20, 2023 at 04:44 PM
+-- Generation Time: Apr 23, 2023 at 01:23 PM
 -- Server version: 5.7.37
 -- PHP Version: 8.1.16
 
@@ -20,6 +20,52 @@ SET time_zone = "+00:00";
 --
 -- Database: `coryl321_QACS`
 --
+
+DELIMITER $$
+--
+-- Procedures
+--
+CREATE DEFINER=`coryl321`@`localhost` PROCEDURE `ADD_SALE` (IN `customer_id` INT, IN `employee_id` INT, IN `sale_date` DATE, IN `item_id` INT, IN `tax_rate` DECIMAL(6,3), INOUT `sale_id` INT, OUT `sub_total` DECIMAL(8,2), OUT `total` DECIMAL(8,2), OUT `err` INT, OUT `msg` VARCHAR(500))   BEGIN
+/* customer_id, employee_id, sale_date, item_id, tax_rate, sale_id, sub_total, total, err, msg */
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        SET msg=CONCAT(msg,' (c=',customer_id,',e=',employee_id,',d=',sale_date,',s=',sale_id,',i=',item_id,')');
+        SET msg=CONCAT(msg, ' ROLL BACK - new invoice not started');
+    END;
+    SET err = 0;
+    SET msg = '';
+    IF(customer_id>0 AND employee_id>0) THEN
+        SET err = 99;
+		SET msg = CONCAT('Error 99 inserting SALE. CustomerID: ',customer_id,' or EmployeeID: ',employee_id,' does not exist.');
+/* insert new sale into SALE table */    
+        INSERT INTO SALE (CustomerID, EmployeeID, SaleDate) VALUES (customer_id,employee_id,sale_date);
+/* retrieve auto-incremented SaleID field after insert*/    
+        SET sale_id = (SELECT LAST_INSERT_ID()); /* shit doesnt work SELECT LAST_INSERT_ID() */
+        SET err = 0;
+        SET msg = '';    
+    END IF;
+/* get item price from ITEM table */
+    SET @itemPrice = (SELECT ItemPrice FROM ITEM WHERE ItemID=item_id); /* replace SELECT 0 */
+    IF(@itemPrice IS NULL) THEN
+        SET err = 66;
+		SET msg = CONCAT('Error 66 Item ',item_id,' does not exist.');
+    ELSE
+        SET err = 44;
+		SET msg = CONCAT('Error 44 SaleID ',sale_id,' does not exist.');
+/* insert item into SALE_ITEM table */
+        INSERT INTO SALE_ITEM (SaleID, ItemID, ItemPrice) VALUES (sale_id,item_id,@itemPrice);
+        SET err = 0;
+        SET msg = '';
+        SET sub_total = (SELECT SUM(ItemPrice) FROM SALE_ITEM WHERE SaleID=sale_id); /* replace SELECT 0 */
+        SET @tax = sub_total * (tax_rate / 100);
+        SET total = sub_total + @tax;
+/* update sub_total, tax and total in SALE record  */
+       	UPDATE SALE SET SubTotal=sub_total,Tax=@tax, Total=total WHERE SaleID=sale_id; 
+        SET msg = CONCAT(msg,' Sale: ',sale_id,' SubTotal: ',FORMAT(sub_total,2),', Tax: ',FORMAT(@tax,3),', Total: ',FORMAT(total,2),' updated.');
+    END IF;
+END$$
+
+DELIMITER ;
 
 -- --------------------------------------------------------
 
@@ -200,6 +246,21 @@ INSERT INTO `SALE_ITEM` (`SaleID`, `SaleItemID`, `ItemID`, `ItemPrice`) VALUES
 (14, 2, 14, 475.00),
 (15, 1, 23, 800.00);
 
+--
+-- Triggers `SALE_ITEM`
+--
+DELIMITER $$
+CREATE TRIGGER `SET_SaleItemID` BEFORE INSERT ON `SALE_ITEM` FOR EACH ROW BEGIN
+    SET @maxSaleItemID = (SELECT MAX(SaleItemID) FROM SALE_ITEM WHERE SaleID=NEW.SaleID);
+    IF(@maxSaleItemID IS NOT NULL) THEN
+        SET NEW.SaleItemID = @maxSaleItemID + 1;
+    ELSE
+    	SET NEW.SaleItemID = 1;
+    END IF;
+END
+$$
+DELIMITER ;
+
 -- --------------------------------------------------------
 
 --
@@ -341,7 +402,7 @@ ALTER TABLE `ITEM`
 -- AUTO_INCREMENT for table `SALE`
 --
 ALTER TABLE `SALE`
-  MODIFY `SaleID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
+  MODIFY `SaleID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=39;
 
 --
 -- AUTO_INCREMENT for table `VENDOR`
