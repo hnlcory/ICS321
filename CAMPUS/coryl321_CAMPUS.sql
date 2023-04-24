@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost:3306
--- Generation Time: Apr 23, 2023 at 03:02 PM
+-- Generation Time: Apr 23, 2023 at 07:37 PM
 -- Server version: 5.7.37
 -- PHP Version: 8.1.16
 
@@ -20,6 +20,65 @@ SET time_zone = "+00:00";
 --
 -- Database: `coryl321_CAMPUS`
 --
+
+DELIMITER $$
+--
+-- Procedures
+--
+CREATE DEFINER=`coryl321`@`localhost` PROCEDURE `ADD_PLACE` (IN `campus1` VARCHAR(10), IN `cuisine1` VARCHAR(25), IN `place1` VARCHAR(50), OUT `error` INT, OUT `msg` VARCHAR(200))   BEGIN
+    DECLARE msg2 VARCHAR(100) DEFAULT '';
+    DECLARE cuisine2 VARCHAR(25) DEFAULT '';
+    DECLARE place2 VARCHAR(50) DEFAULT '';    
+    DECLARE valid INT(11) DEFAULT 0;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        SET msg=CONCAT(msg,' -- SQLEXCEPTION - ROLL BACK - nothing was inserted.');
+        ROLLBACK;
+    END;
+    SET error = '0';
+    SET valid = (SELECT COUNT(*) FROM CAMPUSES WHERE CAMPUS=campus1);
+    IF (valid = 0) THEN    /* Validate campus1 */
+        SET msg = CONCAT(campus1,' is not a designated campus');
+        SET error = '1';
+    END IF;
+    START TRANSACTION;
+    IF (error='0') THEN
+        SET cuisine2 = (SELECT CUISINE FROM PLACE_CUISINES WHERE PLACE=place1); /* get cuisine2 if place1 in PLACES already */
+        SET valid = (SELECT COUNT(*) FROM CUISINES WHERE CUISINE=cuisine1); /* confirm cuisine1 valid if it exists */
+        IF (valid = 0 AND cuisine2 IS NULL) THEN
+            SET msg = CONCAT('Cuisine does not exist or ',cuisine1,' is not a valid cuisine');
+            SET error = '2';
+        ELSEIF (valid = 1 AND cuisine2 IS NOT NULL AND cuisine1 <> cuisine2) THEN
+            SET msg = CONCAT(place1,' exists as a ',cuisine2,' not a ',cuisine1,' cuisine');
+            SET error = '3';
+        ELSEIF (valid = 1 AND cuisine2 IS NULL) THEN
+            SET msg = CONCAT('Unable to insert ',place1,', ',cuisine2,' into PLACE_CUISINES');
+
+            INSERT INTO PLACE_CUISINES SET PLACE=place1, CUISINE=cuisine1;
+            SET msg2 = CONCAT('Added ',place1,' as ',cuisine1,' to PLACE_CUISINES. ');
+        END IF;
+    END IF;
+    IF (error='0') THEN
+        IF (cuisine2 IS NULL) THEN 
+            SET cuisine2 = cuisine1; /*setting this just makes the next SELECT statement easier*/
+        END IF;
+        SET place2 = (SELECT PLACE FROM CAMPUS_PLACES NATURAL JOIN PLACE_CUISINES WHERE CAMPUS=campus1 AND CUISINE=cuisine2);
+        IF (place2 IS NOT NULL) THEN
+            SET msg = CONCAT(place2,' is already the designated favorite ',cuisine2,' for ',campus1);
+            SET error='4';
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = msg;
+        END IF;
+    END IF;
+    IF (error='0') THEN
+        SET msg = CONCAT('Unable to insert ',place1,' for ',campus1);
+  
+        INSERT INTO CAMPUS_PLACES SET CAMPUS=campus1, PLACE=place1;
+        SET msg = CONCAT(msg2,place1,' has been entered as the favorite ',cuisine2,' at ',campus1);
+    END IF;
+    COMMIT;
+END$$
+
+DELIMITER ;
 
 -- --------------------------------------------------------
 
