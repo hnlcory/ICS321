@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost:3306
--- Generation Time: Apr 23, 2023 at 01:44 PM
+-- Generation Time: Apr 23, 2023 at 03:02 PM
 -- Server version: 5.7.37
 -- PHP Version: 8.1.16
 
@@ -42,6 +42,33 @@ CREATE TABLE `CAMPUS_PLACES` (
   `PLACE` varchar(50) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
+--
+-- Triggers `CAMPUS_PLACES`
+--
+DELIMITER $$
+CREATE TRIGGER `CAMPUS_PLACES_VALIDATOR` BEFORE INSERT ON `CAMPUS_PLACES` FOR EACH ROW BEGIN
+	/* CAMPUS, PLACE are incoming parameters */
+	/*INSERT INTO CAMPUS_PLACES (CAMPUS, PLACE) VALUES ('UHM', 'Joes Diner');*/
+	SET @exists = (SELECT COUNT(*) FROM CAMPUSES WHERE CAMPUS = NEW.CAMPUS);
+	IF @exists = 0 THEN
+		SET @msg = CONCAT(NEW.CAMPUS, ' is not a valid campus');
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+	END IF;
+    SET @cuisine = (SELECT CUISINE FROM PLACE_CUISINES WHERE PLACE=NEW.PLACE);
+	IF @cuisine IS NULL THEN
+		SET @msg = CONCAT(NEW.PLACE, ' is not in the database');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+    END IF;
+    SET @place = (SELECT PLACE FROM (CAMPUSES JOIN CUISINES) NATURAL JOIN PLACE_CUISINES NATURAL JOIN CAMPUS_PLACES
+		WHERE CAMPUS=NEW.CAMPUS AND CUISINE=@cuisine);
+    IF @place IS NOT NULL THEN
+		SET @msg = CONCAT(@place, ' is already the designated favorite', @cuisine,' for ',NEW.CAMPUS);
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+    END IF;
+END
+$$
+DELIMITER ;
+
 -- --------------------------------------------------------
 
 --
@@ -74,6 +101,28 @@ CREATE TABLE `PLACE_CUISINES` (
   `PLACE` varchar(50) NOT NULL,
   `CUISINE` varchar(25) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+--
+-- Triggers `PLACE_CUISINES`
+--
+DELIMITER $$
+CREATE TRIGGER `PLACE_CUISINES_VALIDATOR` BEFORE UPDATE ON `PLACE_CUISINES` FOR EACH ROW BEGIN
+/* Input: NEW.PLACE, NEW.CUISINE */
+    SET @placel = (SELECT PLACE FROM CAMPUS_PLACES NATURAL JOIN PLACE_CUISINES
+                    WHERE CUISINE = NEW.CUISINE 
+                    AND CAMPUS IN (SELECT CAMPUS FROM CAMPUS_PLACES WHERE PLACE = NEW.PLACE) LIMIT 1);
+    SET @placel = NULLIF(@placel, '');
+
+    IF @placel IS NOT NULL THEN
+        SET @campusl = (SELECT CAMPUS FROM CAMPUS_PLACES 
+                        WHERE PLACE = @placel 
+                        AND CAMPUS IN (SELECT CAMPUS FROM CAMPUS_PLACES WHERE PLACE = NEW.PLACE) LIMIT 1);
+        SET @msg = CONCAT(NEW.PLACE, ' is a favorite at ', @campus1, ' and ', @campusl, ' already has ', @placel, ' as its favorite ', NEW.CUISINE, ' place');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+    END IF;
+END
+$$
+DELIMITER ;
 
 --
 -- Indexes for dumped tables
